@@ -25,9 +25,16 @@ repositories {
 }
 
 dependencies {
+	// WebSocket
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+	// Lombok
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
+
+	// Redisson
+	implementation 'org.redisson:redisson-spring-boot-starter:3.43.0'
+
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

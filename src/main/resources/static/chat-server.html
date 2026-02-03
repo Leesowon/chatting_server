@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>WebSocket Chat - STOMP</title>
+    <style>
+        body {
+            background-color: #E5E7E9;
+        }
+        #chatArea {
+            display: none;
+        }
+        .message-container {
+            margin-bottom: 10px;
+            display: flex;
+        }
+        .message-left {
+            justify-content: flex-start;
+        }
+        .message-right {
+            justify-content: flex-end;
+        }
+        .message-center {
+            justify-content: center;
+        }
+        .message-bubble {
+            max-width: 60%;
+            padding: 10px 15px;
+            border-radius: 15px;
+            word-wrap: break-word;
+        }
+        .message-left .message-bubble {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+        }
+        .message-right .message-bubble {
+            background-color: #dcf8c6;
+        }
+        .message-system .message-bubble {
+            background-color: #fff9c4;
+            text-align: center;
+            font-style: italic;
+            max-width: 80%;
+        }
+        .sender-name {
+            font-weight: bold;
+            font-size: 0.9em;
+            margin-bottom: 3px;
+        }
+        .message-text {
+            font-size: 1em;
+        }
+        .timestamp {
+            font-size: 0.75em;
+            color: #888;
+            margin-top: 3px;
+        }
+        #messagesDiv {
+            height: 400px;
+            overflow-y: auto;
+            padding: 15px;
+            background-color: #fafafa;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container mt-5">
+    <h2>WebSocket Chat - STOMP Version</h2>
+
+    <!-- 로그인 섹션 -->
+    <div class="card mb-3" id="loginArea">
+        <div class="card-header">Login</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label for="username" class="form-label">Username</label>
+                <input type="text" class="form-control" id="username" placeholder="Enter your name">
+            </div>
+            <div class="mb-3">
+                <label for="roomId" class="form-label">Chat Room</label>
+                <input type="text" class="form-control" id="roomId" placeholder="Enter room name" value="general">
+            </div>
+            <button class="btn btn-primary" id="joinBtn">Join Chat</button>
+        </div>
+    </div>
+
+    <!-- 채팅 섹션 -->
+    <div id="chatArea">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Chat Room: <strong id="currentRoom"></strong></span>
+                <button class="btn btn-danger btn-sm" id="leaveBtn">Leave</button>
+            </div>
+            <div class="card-body">
+                <div id="messagesDiv"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div class="input-group">
+                    <input type="text" class="form-control" id="messageInput" placeholder="Type a message...">
+                    <button class="btn btn-success" id="sendBtn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SockJS: WebSocket fallback 라이브러리 -->
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+
+<!-- STOMP.js: STOMP 프로토콜 클라이언트 라이브러리 -->
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+<script>
+    let stompClient = null;
+    let currentUsername = null;
+    let currentRoomId = null;
+
+    const loginArea = document.getElementById('loginArea');
+    const chatArea = document.getElementById('chatArea');
+    const usernameInput = document.getElementById('username');
+    const roomIdInput = document.getElementById('roomId');
+    const joinBtn = document.getElementById('joinBtn');
+    const leaveBtn = document.getElementById('leaveBtn');
+    const currentRoomSpan = document.getElementById('currentRoom');
+    const messagesDiv = document.getElementById('messagesDiv');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // 채팅방 입장
+    function joinChat() {
+        currentUsername = usernameInput.value.trim();
+        currentRoomId = roomIdInput.value.trim();
+
+        if (!currentUsername || !currentRoomId) {
+            alert('Please enter both username and room name');
+            return;
+        }
+
+        // 1. SockJS로 연결 (username을 쿼리 파라미터로 전달)
+        const socket = new SockJS('/ws-chat?username=' + encodeURIComponent(currentUsername));
+        stompClient = Stomp.over(socket);
+
+        // 2. STOMP 연결
+        stompClient.connect({}, function(frame) {
+            console.log('Connected: ' + frame);
+
+            // 3. 채팅방 메시지 구독
+            stompClient.subscribe('/topic/chat.' + currentRoomId, function(message) {
+                const response = JSON.parse(message.body);
+                displayMessage(response);
+            });
+
+            // 4. 개인 히스토리 구독
+            stompClient.subscribe('/user/queue/history', function(message) {
+                const response = JSON.parse(message.body);
+                displayMessage(response, true);
+            });
+
+            // 5. 입장 메시지 전송
+            stompClient.send("/app/chat.join", {}, JSON.stringify({
+                sender: currentUsername,
+                roomId: currentRoomId,
+                type: 'JOIN'
+            }));
+
+            // UI 전환
+            loginArea.style.display = 'none';
+            chatArea.style.display = 'block';
+            currentRoomSpan.textContent = currentRoomId;
+            messageInput.focus();
+        }, function(error) {
+            console.error('Connection error: ' + error);
+            alert('Failed to connect to chat server');
+        });
+    }
+
+    // 채팅방 퇴장
+    function leaveChat() {
+        if (stompClient !== null) {
+            // 퇴장 메시지 전송
+            stompClient.send("/app/chat.leave", {}, JSON.stringify({
+                sender: currentUsername,
+                roomId: currentRoomId,
+                type: 'LEAVE'
+            }));
+
+            // 연결 해제
+            stompClient.disconnect(function() {
+                console.log('Disconnected');
+                loginArea.style.display = 'block';
+                chatArea.style.display = 'none';
+                messagesDiv.innerHTML = '';
+                currentUsername = null;
+                currentRoomId = null;
+            });
+        }
+    }
+
+    // 메시지 전송
+    function sendMessage() {
+        const message = messageInput.value.trim();
+        if (!message) {
+            return;
+        }
+
+        stompClient.send("/app/chat.send", {}, JSON.stringify({
+            sender: currentUsername,
+            message: message,
+            roomId: currentRoomId,
+            type: 'CHAT'
+        }));
+
+        messageInput.value = '';
+        messageInput.focus();
+    }
+
+    // 메시지 표시
+    function displayMessage(response, isHistory = false) {
+        const container = document.createElement("div");
+        container.className = "message-container";
+
+        const bubble = document.createElement("div");
+        bubble.className = "message-bubble";
+
+        // 메시지 타입별 스타일
+        if (response.type === 'JOIN' || response.type === 'LEAVE') {
+            // 시스템 메시지
+            container.className += " message-system message-center";
+            bubble.innerHTML = `
+                <div class="message-text">${response.message}</div>
+                <div class="timestamp">${new Date(response.timestamp).toLocaleTimeString()}</div>
+            `;
+        } else if (response.sender === currentUsername) {
+            // 내 메시지 (오른쪽)
+            container.className += " message-right";
+            bubble.innerHTML = `
+                <div class="message-text">${escapeHtml(response.message)}</div>
+                <div class="timestamp">${new Date(response.timestamp).toLocaleTimeString()}</div>
+            `;
+        } else {
+            // 다른 사용자 메시지 (왼쪽)
+            container.className += " message-left";
+            bubble.innerHTML = `
+                <div class="sender-name">${escapeHtml(response.sender)}</div>
+                <div class="message-text">${escapeHtml(response.message)}</div>
+                <div class="timestamp">${new Date(response.timestamp).toLocaleTimeString()}</div>
+            `;
+        }
+
+        container.appendChild(bubble);
+        messagesDiv.appendChild(container);
+
+        // 히스토리가 아닌 경우만 스크롤
+        if (!isHistory) {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+    }
+
+    // HTML 이스케이프 (XSS 방지)
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 이벤트 리스너
+    joinBtn.addEventListener('click', joinChat);
+    leaveBtn.addEventListener('click', leaveChat);
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Enter 키로 전송
+    usernameInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') joinChat();
+    });
+    roomIdInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') joinChat();
+    });
+    messageInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // 페이지 떠날 때 연결 해제
+    window.addEventListener('beforeunload', function() {
+        if (stompClient !== null) {
+            stompClient.send("/app/chat.leave", {}, JSON.stringify({
+                sender: currentUsername,
+                roomId: currentRoomId,
+                type: 'LEAVE'
+            }));
+        }
+    });
+</script>
+
+</body>
+</html>
