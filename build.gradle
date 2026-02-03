@@ -35,6 +35,10 @@ dependencies {
 	// Redisson
 	implementation 'org.redisson:redisson-spring-boot-starter:3.43.0'
 
+	// RabbitMQ (다중 서버 메시지 브로커)
+	implementation 'org.springframework.boot:spring-boot-starter-amqp'
+	implementation 'io.projectreactor.netty:reactor-netty'
+
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

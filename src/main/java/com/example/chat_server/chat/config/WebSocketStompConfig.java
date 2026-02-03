@@ -1,5 +1,6 @@
 package com.example.chat_server.chat.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -26,11 +27,31 @@ import java.util.Map;
  *    - /topic/chat.general → 채팅방의 모든 사람에게 전송
  *    - /user/Alice/queue/history → Alice 한 명에게만 전송
  *
- * 3. 서버 메모리에 "누가 어떤 주소를 구독 중인지" 저장 (단일 서버만 지원)
+ * 3. RabbitMQ를 통한 다중 서버 메시지 브로커 연동
+ *    - 서버 A의 클라이언트와 서버 B의 클라이언트가 실시간 채팅 가능
+ *    - RabbitMQ가 모든 서버 간 메시지 라우팅 및 구독 관리 담당
  */
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketStompConfig implements WebSocketMessageBrokerConfigurer {
+
+    @Value("${spring.websocket.stomp.relay.host}")
+    private String relayHost;
+
+    @Value("${spring.websocket.stomp.relay.port}")
+    private int relayPort;
+
+    @Value("${spring.websocket.stomp.relay.client-login}")
+    private String clientLogin;
+
+    @Value("${spring.websocket.stomp.relay.client-passcode}")
+    private String clientPasscode;
+
+    @Value("${spring.websocket.stomp.relay.system-login}")
+    private String systemLogin;
+
+    @Value("${spring.websocket.stomp.relay.system-passcode}")
+    private String systemPasscode;
 
     /**
      * WebSocket 연결 주소 설정
@@ -51,23 +72,40 @@ public class WebSocketStompConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     /**
-     * 메시지 주소 규칙 설정
+     * 메시지 브로커 설정 - RabbitMQ 기반 다중 서버 지원
+     *
+     * [단일 서버 vs 다중 서버]
+     * - enableSimpleBroker: 서버 메모리에만 구독 정보 저장 → 같은 서버 내 클라이언트끼리만 통신 가능
+     * - enableStompBrokerRelay: RabbitMQ를 통해 모든 서버가 메시지 공유 → 서버 A 클라이언트 ↔ 서버 B 클라이언트 통신 가능
+     *
+     * [메시지 주소 규칙]
      * - /app/chat.send: 클라이언트가 서버로 메시지 보낼 때 (→ @MessageMapping으로 처리)
      * - /topic/chat.general: 채팅방의 모든 사람에게 메시지 보낼 때
      * - /user/Alice/queue/history: Alice 한 명에게만 메시지 보낼 때
-     *
-     * enableSimpleBroker: 서버 메모리에 "누가 어떤 주소 구독 중인지" 저장 (단일 서버만 가능)
      */
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
 
-        // 1. 메시지 브로커 활성화: 클라이언트가 구독할 목적지 prefix
-        registry.enableSimpleBroker("/topic", "/queue");
+        // 1. RabbitMQ 외부 브로커 연동 (다중 서버 지원)
+        //    - 기존 enableSimpleBroker는 서버 메모리에만 구독 정보 저장 (단일 서버 제한)
+        //    - enableStompBrokerRelay는 RabbitMQ를 통해 여러 서버 간 메시지 공유
+        //    - 서버 A 클라이언트 ↔ RabbitMQ ↔ 서버 B 클라이언트 실시간 통신 가능
+        registry.enableStompBrokerRelay("/topic", "/queue")
+                .setRelayHost(relayHost)              // RabbitMQ 서버 주소
+                .setRelayPort(relayPort)              // RabbitMQ STOMP 포트 (기본: 61613)
+                .setClientLogin(clientLogin)          // 클라이언트 연결용 인증 정보
+                .setClientPasscode(clientPasscode)
+                .setSystemLogin(systemLogin)          // 시스템 연결용 인증 정보 (heartbeat, 관리 작업)
+                .setSystemPasscode(systemPasscode)
+                .setSystemHeartbeatSendInterval(20000)    // 20초마다 heartbeat 전송
+                .setSystemHeartbeatReceiveInterval(20000); // 20초 내 heartbeat 수신 기대
 
         // 2. 애플리케이션 목적지 prefix: 클라이언트가 메시지를 보낼 목적지
+        //    변경사항 없음 - /app/chat.send 등 기존 엔드포인트 그대로 작동
         registry.setApplicationDestinationPrefixes("/app");
 
         // 3. 사용자 목적지 prefix: 특정 사용자에게 메시지를 보낼 때 사용
+        //    변경사항 없음 - RabbitMQ가 자동으로 user-specific routing 처리
         registry.setUserDestinationPrefix("/user");
     }
 

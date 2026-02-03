@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq-stomp
+    ports:
+      - "5672:5672"    # AMQP 프로토콜 (기본 메시징)
+      - "61613:61613"  # STOMP 프로토콜 (Spring이 여기로 연결)
+      - "15672:15672"  # 관리 UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # STOMP 플러그인은 컨테이너 시작 후 수동 활성화 필요:
+    # docker exec -it chat-rabbitmq rabbitmq-plugins enable rabbitmq_stomp
+
+  redis:
+    image: redis:7-alpine
+    container_name: chat-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  rabbitmq_data:
+  redis_data:
